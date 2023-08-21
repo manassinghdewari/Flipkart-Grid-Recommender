@@ -16,6 +16,8 @@ class Command(BaseCommand):
             reader = csv.DictReader(file)
             for row in reader:
                 category_name = row['product_category_tree'].split('>>')[0].strip()
+                category_name= category_name.split('["')[1].strip()
+                print(category_name)
                 product_name = row['product_name']
                 pid = row['pid']
                 try:

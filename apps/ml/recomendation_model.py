@@ -3,7 +3,7 @@ from sklearn.metrics.pairwise import linear_kernel, cosine_similarity
 import os 
 from nltk.tokenize import word_tokenize
 import pandas as pd
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import LabelEncoder, StandardScaler
 import numpy as np
 import copy
 from collections import defaultdict
@@ -84,34 +84,36 @@ def get_user_similarity_matrix(user_id, percentile=90):
     # Load the dataset
     users_dataset =  Customer.objects.all().values("id","age","gender","intrest")
     data = pd.DataFrame(users_dataset)
+    id_list = data['id'].tolist()
+    if(len(id_list)):
+        return [(user_id,1)]
+    index0 = data[data['id'] == user_id].index[0]
+    
     age_bins = [0, 18, 30, 50, 100]  # Adjust the bins as needed
-    age_labels = ['0-18', '19-30', '31-50', '51+']
-
-    # Use pd.cut() to create age groups
+    age_labels = ['0-18','19-30', '31-50', '50+']
     data['age_group'] = pd.cut(data['age'], bins=age_bins, labels=age_labels, right=False)
+
+
+
 
     # Select relevant columns for user characteristics
     user_data = data[['id', 'age_group', 'gender', 'intrest']]
+    user_data["combined_text"]=str(user_data["age_group"]) + " "+(user_data["gender"]) + " " +(user_data["intrest"])
 
-    # Handle missing values
-    user_data.loc[:, 'intrest'] = user_data['intrest'].fillna('')
+    tfidf_vectorizer = TfidfVectorizer(stop_words='english', min_df=2, ngram_range=(1, 2))
 
+    # Fit and transform the combined text
+    tfidf_matrix = tfidf_vectorizer.fit_transform(user_data['combined_text'])
 
-    # Encode categorical features
-    label_encoders = {}
-    for column in ['age_group', 'gender']:
-        le = LabelEncoder()
-        user_data[column] = le.fit_transform(user_data[column])
-        label_encoders[column] = le
+    # Calculate the cosine similarity
+    cosine_sim = cosine_similarity(tfidf_matrix, tfidf_matrix)
+    user_similarity_matrix=[]
+    for id in id_list:
+        index1 = data[data['id'] == id].index[0]
+        user_similarity_matrix.append((id,cosine_sim[index0][index1]))
 
-    # Feature extraction for 'intrest' using TF-IDF
-    tfidf_vectorizer = TfidfVectorizer()
-    intrest_tfidf = tfidf_vectorizer.fit_transform(user_data['intrest'])
-
-    # Calculate cosine similarity between users based on their characteristics
-    user_similarity_matrix = cosine_similarity(user_data[['age_group', 'gender']], dense_output=False)
-
-    # print ('User similarity matrix',user_similarity_matrix)
+    
+    
 
     return user_similarity_matrix
 
@@ -170,10 +172,10 @@ def generate_user_product_matrix():
 def process_result_matrix(result_matrix):
     
     user_list=Customer.objects.all().values('id')
+
     users=[item['id'] for item in user_list]
     with open(os.path.join(os.getcwd(),'apps/ml/data/products.pkl'), 'rb') as f:
         products = pickle.load(f)
-    
     new_result_matrix=copy.deepcopy(result_matrix)
 
     # List to store tuples with missing or zero entries
@@ -189,22 +191,34 @@ def process_result_matrix(result_matrix):
     # for user, product, score in result_matrix:
     for entry in missing_entries:
         user_or, item_or = entry
+        print(entry)
 
         items_matrix = []
         user_items=[]
+        if(user_or in new_result_matrix):
 
-        items = result_matrix[user_or].keys()
-        for item in items:
-            user_items.append((user_or, item))
-        
 
-        user_items.sort(key=lambda x: x[1], reverse=True) # Sort items by score in descending order
-        top_items = user_items[:10]  # Get top 10 items for the user
-        for item in top_items:
-            items_matrix.append(str(item[1]))     
-        value = get_item_score(items_matrix, item_or)
+            items = new_result_matrix[user_or].keys()
+            for item in items:
+                user_items.append((user_or, item))
+            
+
+            user_items.sort(key=lambda x: x[1], reverse=True) # Sort items by score in descending order
+            top_items = user_items[:10]  # Get top 10 items for the user
+            for item in top_items:
+                items_matrix.append(str(item[1]))  
+            print(items_matrix) 
+            if(len(items_matrix)>0):
+                value = get_item_score(items_matrix, item_or)
+            else:
+                value=0.33333
+        else:
+            new_result_matrix[user_or]={}
+            value=0.33333
+        print(value)
 
         new_result_matrix[user_or][item_or] = value
+        print(new_result_matrix)
 
     return new_result_matrix
 
@@ -275,17 +289,18 @@ def recommend_items(user_id):
     print("got user_similarity_matrix")
     user_product_matrix = generate_user_product_matrix()
     print("got user_product_matrix")
-    print(user_product_matrix)
+    # print(user_product_matrix)
     result_matrix = process_result_matrix(user_product_matrix)
     print("got result_matrix")
     formatted_matrix=covert_to_format(result_matrix)
     print("got formatted_matrix")
     user_item_score_matrix = collaborative_filtering(formatted_matrix)
     print("got user_item_score_matrix")
-    user_similarity_matrix = [
-    (1, 0.8),
-    (2, 0.6)
-    ]
+    print(user_similarity_matrix)
+    # user_similarity_matrix = [
+    # (1, 0.8),
+    # (2, 0.6)
+    # ]
 
     # user_item_score_matrix = {
     #     'user1': [('uiklukikjm', 0.9), ('rterhr', 0.7)],
